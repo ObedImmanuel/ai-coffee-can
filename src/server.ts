@@ -43,7 +43,13 @@ export const BROKERS = {
 } as const;
 export type Broker = keyof typeof BROKERS;
 
-const MODEL = "@cf/moonshotai/kimi-k2.6";
+/**
+ * Available on the Workers Free plan, with tool calling. (Llama 3.3 streams each
+ * token in two formats, which workers-ai-provider 3.3 emits twice.)
+ */
+const MODEL = "@cf/openai/gpt-oss-120b";
+/** Workers AI defaults to 256 output tokens, which the model's reasoning alone can use up. */
+const MAX_TOKENS = 4096;
 /** Every day at 11:00 UTC = 4:30 PM IST, after the Indian market closes. */
 const DAILY_CRON = "0 11 * * *";
 
@@ -285,6 +291,7 @@ export class PortfolioAgent extends AIChatAgent<Env, DashboardState> {
       const { text } = await generateText({
         model: this.model(),
         system: ANALYSIS_SYSTEM,
+        maxOutputTokens: MAX_TOKENS,
         prompt: `Today is ${today()}. Broker status: ${JSON.stringify(this.state.sources)}.\nPortfolio JSON:\n${portfolioContext(holdings, this.state.metrics, this.state.history)}`
       });
       const analysis = parseAnalysis(text, new Date().toISOString());
@@ -360,10 +367,11 @@ export class PortfolioAgent extends AIChatAgent<Env, DashboardState> {
     const holdings = this.loadHoldings();
     const result = streamText({
       model: this.model(),
+      maxOutputTokens: MAX_TOKENS,
       system: `You are the investing assistant inside Coffee Can, a portfolio dashboard for a long-term "coffee can" investor in India.
 ${ADVISER_NOTE}
 - Answer from the portfolio data below or from tool results. Never invent prices, ratios, news or holdings; if data is missing, say so.
-- Amounts are in Indian rupees; write them lakh/crore style (e.g. ₹13.8 L).
+- Amounts are already formatted in Indian rupees (L = lakh, Cr = crore); quote them exactly as given, never convert them.
 - Be concise: short answers with the key numbers.
 - You can't place orders or change anything at the broker.
 
@@ -405,7 +413,7 @@ ${holdings.length ? portfolioContext(holdings, this.state.metrics, this.state.hi
         }),
         runDailyAnalysis: tool({
           description:
-            "Run the daily analysis now (refresh holdings and write a new review on the dashboard).",
+            "Run the daily analysis now and write a new review on the dashboard. Only use this when the user explicitly asks for a new analysis; to answer questions, use the portfolio data you already have.",
           inputSchema: z.object({}),
           execute: async () => {
             await this.dailyAnalysis();
@@ -416,7 +424,8 @@ ${holdings.length ? portfolioContext(holdings, this.state.metrics, this.state.hi
       stopWhen: stepCountIs(5),
       abortSignal: options?.abortSignal
     });
-    return result.toUIMessageStreamResponse();
+    // Show the real reason (e.g. a Workers AI quota error) instead of a generic message.
+    return result.toUIMessageStreamResponse({ onError: errMsg });
   }
 }
 

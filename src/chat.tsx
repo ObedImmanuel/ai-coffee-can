@@ -34,10 +34,11 @@ export function Chat({
 }) {
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
-  const { messages, sendMessage, clearHistory, stop, status } = useAgentChat({
-    agent,
-    experimental_throttle: 100
-  });
+  const { messages, sendMessage, clearHistory, stop, status, error } =
+    useAgentChat({
+      agent,
+      experimental_throttle: 100
+    });
   const streaming = status === "streaming" || status === "submitted";
 
   useEffect(() => {
@@ -150,6 +151,11 @@ export function Chat({
           <Text size="xs" variant="secondary">
             Thinking…
           </Text>
+        )}
+        {error && (
+          <div className="text-xs text-kumo-danger">
+            Couldn't get a reply: {error.message}
+          </div>
         )}
         <div ref={endRef} />
       </div>

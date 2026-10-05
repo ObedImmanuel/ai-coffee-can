@@ -17,13 +17,13 @@ flowchart LR
   W --> DB[("SQLite in the Durable Object<br/>holdings, analyses, history, chat")]
   W -->|"MCP client (OAuth)"| K["Kite MCP<br/>mcp.kite.trade"]
   W -->|"MCP client (OAuth)"| I["INDmoney MCP<br/>mcp.indmoney.com"]
-  W --> AI["Workers AI<br/>Kimi K2.6"]
+  W --> AI["Workers AI<br/>gpt-oss-120b"]
   S["Agent schedule<br/>cron 0 11 * * * (UTC)"] --> W
 ```
 
 | Requirement             | Cloudflare product                                                         | Where                                             |
 | ----------------------- | -------------------------------------------------------------------------- | ------------------------------------------------- |
-| LLM                     | Workers AI (`@cf/moonshotai/kimi-k2.6`) through `workers-ai-provider`      | `src/server.ts` (`model()`)                       |
+| LLM                     | Workers AI (`@cf/openai/gpt-oss-120b`) through `workers-ai-provider`       | `src/server.ts` (`model()`)                       |
 | Workflow / coordination | Agents SDK on Durable Objects, with `schedule()` for the daily cron        | `src/server.ts` (`dailyAnalysis`)                 |
 | User input via chat     | `AIChatAgent` + `useAgentChat` over WebSockets, streaming                  | `src/server.ts` (`onChatMessage`), `src/chat.tsx` |
 | Memory / state          | Durable Object SQLite (`this.sql`) + agent state synced to the browser     | `src/server.ts`, `src/dashboard.tsx`              |
