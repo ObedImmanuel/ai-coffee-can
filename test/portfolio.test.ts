@@ -93,34 +93,60 @@ describe("parsers", () => {
     });
   });
 
-  it("parses INDmoney holdings with varied field names and skips Zerodha rows", () => {
-    const h = parseIndmoneyHoldings({
+  it("parses INDmoney networth_holdings, unwrapping { result: json }", () => {
+    const payload = {
       holdings: [
         {
-          name: "Apple Inc",
-          symbol: "AAPL",
-          asset_class: "US Stocks",
-          current_value: "1,20,000",
-          invested_value: 90000,
-          quantity: 5
+          investment_code: "AAPL",
+          investment: "Apple Inc",
+          asset_type: "US_STOCK",
+          invested_amount: 90000,
+          market_value: 120000,
+          total_units: 5,
+          broker: "Alpaca",
+          one_day_change_percentage: 0.4
         },
         {
-          scheme_name: "Axis Small Cap",
-          asset_type: "Mutual Fund",
-          currentValue: { amount: 50000 },
-          investedAmount: 40000
+          investment_code: "NIFTYBEES",
+          investment: "Nippon India Nifty 50 BeES",
+          asset_type: "IND_STOCK",
+          invested_amount: 20000,
+          market_value: 26000,
+          total_units: 100,
+          broker: "Zerodha"
         },
-        { name: "TCS", broker: "Zerodha", current_value: 1000 }
-      ]
-    });
-    expect(h).toHaveLength(2);
-    expect(h[0]).toMatchObject({
+        {
+          investment_code: "120503",
+          investment: "Axis Small Cap Fund",
+          asset_type: "MF",
+          invested_amount: 40000,
+          market_value: 50000,
+          total_units: 600
+        }
+      ],
+      derivative_positions: [
+        { position_id: "x", ind_stock_id: "y", avg_price: 1 }
+      ],
+      asset_summary: { total_value: 196000 }
+    };
+    const res = {
+      structuredContent: { result: JSON.stringify(payload) },
+      content: []
+    };
+    const all = parseIndmoneyHoldings(resultData(res));
+    expect(all.map((h) => h.kind)).toEqual(["us_stock", "etf", "mutual_fund"]);
+    expect(all[0]).toMatchObject({
       symbol: "AAPL",
-      kind: "us_stock",
+      name: "Apple Inc",
+      quantity: 5,
       value: 120000,
-      invested: 90000
+      invested: 90000,
+      dayChangePct: 0.4
     });
-    expect(h[1]).toMatchObject({ kind: "mutual_fund", value: 50000 });
+    // With Kite connected, Zerodha rows are left to Kite.
+    expect(parseIndmoneyHoldings(payload, { skipZerodha: true })).toHaveLength(
+      2
+    );
   });
 });
 

@@ -21,6 +21,7 @@ import {
   demoHoldings,
   EMPTY_STATE,
   firstUrl,
+  INDMONEY_ASSET_TYPES,
   needsLogin,
   parseIndmoneyHoldings,
   parseKiteHoldings,
@@ -191,8 +192,12 @@ export class PortfolioAgent extends AIChatAgent<Env, DashboardState> {
     return Object.keys(servers).find((id) => servers[id].name === broker);
   }
 
-  private async callTool(serverId: string, name: string) {
-    return this.mcp.callTool({ serverId, name, arguments: {} });
+  private async callTool(
+    serverId: string,
+    name: string,
+    args: Record<string, unknown> = {}
+  ) {
+    return this.mcp.callTool({ serverId, name, arguments: args });
   }
 
   /** Fetches one broker's holdings over MCP and stores them. Never throws; failures go into the source status. */
@@ -232,17 +237,26 @@ export class PortfolioAgent extends AIChatAgent<Env, DashboardState> {
             : [])
         ];
       } else {
-        const res = await this.callTool(id, "networth_holdings");
-        if (res.isError || needsLogin(res)) {
-          this.setStatus("indmoney", {
-            state: "needs_login",
-            message: resultText(res).slice(0, 200) || "Reconnect INDmoney."
+        holdings = [];
+        const skipZerodha = this.serverId("kite") !== undefined;
+        for (const assetType of INDMONEY_ASSET_TYPES) {
+          const res = await this.callTool(id, "networth_holdings", {
+            asset_type: assetType
           });
-          return;
-        }
-        holdings = parseIndmoneyHoldings(resultData(res));
-        if (!holdings.length && resultData(res) === null) {
-          throw new Error("Couldn't read holdings from INDmoney's response.");
+          if (needsLogin(res)) {
+            this.setStatus("indmoney", {
+              state: "needs_login",
+              message:
+                "INDmoney's session expired. Disconnect and connect again."
+            });
+            return;
+          }
+          if (res.isError) {
+            throw new Error(resultText(res).slice(0, 200) || "INDmoney error");
+          }
+          holdings.push(
+            ...parseIndmoneyHoldings(resultData(res), { skipZerodha })
+          );
         }
       }
       this.saveHoldings(broker, holdings);

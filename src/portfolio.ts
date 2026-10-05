@@ -125,13 +125,26 @@ export function resultText(result: unknown): string {
     .join("\n");
 }
 
+/** Python MCP servers often wrap a JSON string return value as { result: "<json>" }. */
+function unwrap(v: unknown): unknown {
+  const inner = (v as { result?: unknown } | null)?.result;
+  if (typeof inner === "string") {
+    try {
+      return JSON.parse(inner);
+    } catch {
+      return v;
+    }
+  }
+  return v;
+}
+
 /** Structured data from an MCP tool result: structuredContent, or JSON in the text. */
 export function resultData(result: unknown): unknown {
   const r = result as ToolResult;
-  if (r?.structuredContent !== undefined) return r.structuredContent;
+  if (r?.structuredContent !== undefined) return unwrap(r.structuredContent);
   const text = resultText(result).trim();
   try {
-    return JSON.parse(text);
+    return unwrap(JSON.parse(text));
   } catch {
     // Some servers wrap JSON in prose; take the outermost array or object.
     const m = text.match(/[[{][\s\S]*[\]}]/);
@@ -265,6 +278,8 @@ function kindFrom(r: Row, symbol: string, name: string): Kind {
       "type"
     ]) ?? ""
   ).toLowerCase();
+  if (t === "us_stock") return "us_stock";
+  if (t === "ind_stock") return etfLike(symbol, name) ? "etf" : "stock";
   if (/mutual|mf|fund/.test(t)) return "mutual_fund";
   if (/us|global|international|foreign/.test(t)) return "us_stock";
   if (/etf/.test(t) || etfLike(symbol, name)) return "etf";
@@ -272,75 +287,42 @@ function kindFrom(r: Row, symbol: string, name: string): Kind {
   return t ? "other" : "stock";
 }
 
+/** Asset types requested from INDmoney's `networth_holdings` (it returns one type per call). */
+export const INDMONEY_ASSET_TYPES = ["IND_STOCK", "MF", "US_STOCK"] as const;
+
 /**
- * INDmoney `networth_holdings`. Its response shape isn't documented, so this
- * reads any array of holding-like objects and maps common field names.
- * Rows from Zerodha are skipped: Kite is connected directly and is the source of truth for them.
+ * INDmoney `networth_holdings` for one asset type. Rows look like
+ * { investment_code, investment, asset_type, invested_amount, market_value,
+ *   total_units, broker, one_day_change_percentage } with amounts in INR.
+ * Only `holdings` is read: the IND_STOCK response also carries F&O positions
+ * and open orders, which aren't holdings.
  */
-export function parseIndmoneyHoldings(data: unknown): Holding[] {
+export function parseIndmoneyHoldings(
+  data: unknown,
+  opts: { skipZerodha?: boolean } = {}
+): Holding[] {
+  const rows = (data as { holdings?: unknown } | null)?.holdings;
+  if (!Array.isArray(rows)) return [];
   const out: Holding[] = [];
-  for (const rows of objectArrays(data)) {
-    for (const r of rows) {
-      const name = String(
-        pick(r, [
-          "name",
-          "display_name",
-          "scheme_name",
-          "stock_name",
-          "instrument_name",
-          "title",
-          "symbol"
-        ]) ?? ""
-      );
-      const symbol = String(
-        pick(r, ["symbol", "ticker", "tradingsymbol", "isin", "id"]) ?? name
-      );
-      const value = num(
-        pick(r, [
-          "current_value",
-          "currentValue",
-          "market_value",
-          "marketValue",
-          "current_amount",
-          "value",
-          "valuation"
-        ])
-      );
-      if (!name || value === null) continue;
-      const broker = String(
-        pick(r, ["broker", "broker_name", "platform"]) ?? ""
-      );
-      if (/zerodha|kite/i.test(broker)) continue;
-      const invested =
-        num(
-          pick(r, [
-            "invested_value",
-            "investedValue",
-            "invested_amount",
-            "investedAmount",
-            "invested",
-            "cost_value",
-            "buy_value"
-          ])
-        ) ?? value;
-      out.push({
-        source: "indmoney",
-        symbol,
-        name,
-        kind: kindFrom(r, symbol, name),
-        quantity: num(pick(r, ["quantity", "units", "qty", "shares"])) ?? 0,
-        invested,
-        value,
-        dayChangePct: num(
-          pick(r, [
-            "day_change_percentage",
-            "dayChangePct",
-            "day_change_pct",
-            "one_day_return_pct"
-          ])
-        )
-      });
+  for (const r of rows as Row[]) {
+    const name = String(pick(r, ["investment", "name"]) ?? "");
+    const symbol = String(pick(r, ["investment_code", "symbol"]) ?? name);
+    const value = num(pick(r, ["market_value", "current_value"]));
+    if (!name || value === null) continue;
+    // With Kite connected directly, Zerodha rows would be counted twice.
+    if (opts.skipZerodha && /zerodha|kite/i.test(String(r.broker ?? ""))) {
+      continue;
     }
+    out.push({
+      source: "indmoney",
+      symbol,
+      name,
+      kind: kindFrom(r, symbol, name),
+      quantity: num(pick(r, ["total_units", "units", "quantity"])) ?? 0,
+      invested: num(pick(r, ["invested_amount", "invested_value"])) ?? value,
+      value,
+      dayChangePct: num(r.one_day_change_percentage)
+    });
   }
   return out;
 }
