@@ -3,7 +3,7 @@
 Coffee Can is a small investing assistant for a long-term ("coffee can") investor in India. It runs entirely on Cloudflare:
 
 - **Dashboard:** portfolio value, gain, today's change, allocation, value over time, and a holdings table.
-- **Connectors:** connect **Zerodha (Kite)** and **INDmoney** through their official MCP servers. Holdings are fetched over MCP and stored in the agent's database.
+- **Connectors:** connect **Zerodha (Kite)** and **INDmoney** through their official MCP servers; holdings are fetched over MCP and stored in the agent's database. Optionally connect **Tapetide**, a hosted market data MCP server (NSE/BSE quotes, financials, ratios, technicals), so the chat can look up any stock.
 - **Chat:** ask questions about your investments. Answers come from your stored portfolio and the latest analysis.
 - **Daily analysis:** a schedule runs every day at 4:30 PM IST. It refreshes holdings from the brokers, writes a short review with Workers AI, and updates the dashboard live.
 
@@ -17,6 +17,7 @@ flowchart LR
   W --> DB[("SQLite in the Durable Object<br/>holdings, analyses, history, chat")]
   W -->|"MCP client (OAuth)"| K["Kite MCP<br/>mcp.kite.trade"]
   W -->|"MCP client (OAuth)"| I["INDmoney MCP<br/>mcp.indmoney.com"]
+  W -->|"MCP client (OAuth), chat only"| T["Tapetide MCP<br/>mcp.tapetide.com"]
   W --> AI["Workers AI<br/>gpt-oss-120b"]
   S["Agent schedule<br/>cron 0 11 * * * (UTC)"] --> W
 ```
@@ -37,12 +38,16 @@ flowchart LR
 3. The agent calls the broker's read-only tools (`get_holdings` and `get_mf_holdings` on Kite, `networth_holdings` on INDmoney), turns the results into holdings (`src/portfolio.ts`), and writes them to SQLite.
 4. The agent recomputes totals, allocation and history and calls `setState()`, so every open dashboard updates instantly.
 5. `dailyAnalysis()` runs on the cron, or from **Run analysis**. It refreshes, sends a compact portfolio JSON to Workers AI, parses the JSON review, and stores it (the last 60 are kept).
-6. The chat model sees the portfolio and the latest review in its system prompt. It has three tools: `refreshPortfolio`, `getPastAnalyses` and `runDailyAnalysis`.
+6. The chat model sees the portfolio and the latest review in its system prompt. It has three tools of our own (`refreshPortfolio`, `getPastAnalyses`, `runDailyAnalysis`) plus the **read-only market data tools** of the connected MCP servers, e.g. `kite_get_ltp`, `indmoney_get_indian_stocks_details`, `tapetide_*` (`mcpChatTools()` in `src/server.ts`).
 
 ### Safety choices
 
-- **The model never gets the broker tools.** Kite's MCP server can place orders; the agent calls only the read-only tools itself, and the chat model gets just the three tools above.
-- **Fixed broker URLs.** The agent connects only to the two known MCP servers, never to a URL the client sends.
+- **The model only gets read-only MCP tools** (`src/connectors.ts`, tested in `test/connectors.test.ts`):
+  - Brokers: an explicit allow-list of market data tools (`get_ltp`, `get_quotes`, `get_historical_data`, INDmoney's stock and fund details…). Order, GTT, login and holdings tools are never exposed; holdings come from the database so chat and dashboard agree.
+  - Market data servers: any tool, unless MCP annotations mark it destructive.
+  - A hard block on write-like names (`place`, `order`, `cancel`, `delete`, `save`, `watchlist`…) applies to everything, as a second guard.
+  - Tool output is truncated to 6,000 characters, errors and expired sessions come back as data with a hint, and the prompt tells the model to ignore instructions inside tool results.
+- **Fixed connector URLs.** The agent connects only to the three known MCP servers, never to a URL the client sends.
 - **Not advice.** Prompts tell the model to explain trade-offs and never tell the user to buy or sell.
 
 ## Run it locally
@@ -89,6 +94,7 @@ npm run check
 src/server.ts      Worker entry and PortfolioAgent: storage, MCP connectors, daily analysis, chat
 src/portfolio.ts   Types, MCP result parsers, metrics, demo data, formatting
 src/analysis.ts    Prompts and analysis parsing
+src/connectors.ts  Connector list and the chat tool safety policy
 src/app.tsx        Layout, agent connection
 src/dashboard.tsx  Dashboard and connector cards
 src/chat.tsx       Chat panel

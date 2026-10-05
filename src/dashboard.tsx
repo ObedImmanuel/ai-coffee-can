@@ -12,7 +12,7 @@ import {
   TrashIcon,
   WarningIcon
 } from "@phosphor-icons/react";
-import type { Broker, PortfolioAgent } from "./server";
+import type { Connector, PortfolioAgent } from "./server";
 import {
   gainPct,
   inr,
@@ -28,7 +28,11 @@ export type AgentClient = ReturnType<
   typeof useAgent<PortfolioAgent, DashboardState>
 >;
 
-const BROKERS: Array<{ id: Broker; label: string; blurb: string }> = [
+const CONNECTOR_CARDS: Array<{
+  id: Connector;
+  label: string;
+  blurb: string;
+}> = [
   {
     id: "kite",
     label: "Zerodha (Kite)",
@@ -38,6 +42,12 @@ const BROKERS: Array<{ id: Broker; label: string; blurb: string }> = [
     id: "indmoney",
     label: "INDmoney",
     blurb: "US stocks and other assets via INDmoney's MCP server."
+  },
+  {
+    id: "tapetide",
+    label: "Tapetide (market data)",
+    blurb:
+      "Lets the chat look up live prices, financials, ratios and technicals for NSE/BSE stocks. Free account."
   }
 ];
 
@@ -198,11 +208,12 @@ function Connectors({ state, mcp, agent, connected }: Props) {
       }
     >
       <div className="grid gap-3 sm:grid-cols-2">
-        {BROKERS.map((b) => {
+        {CONNECTOR_CARDS.map((b) => {
           const server = Object.values(mcp.servers).find(
             (s) => s.name === b.id
           );
-          const status = state.sources[b.id];
+          // Market data connectors have no holdings, so no source status.
+          const status = b.id === "tapetide" ? undefined : state.sources[b.id];
           const authUrl =
             server?.state === "authenticating" ? server.auth_url : null;
           return (
@@ -216,6 +227,8 @@ function Connectors({ state, mcp, agent, connected }: Props) {
                   <Badge variant="secondary">Not connected</Badge>
                 ) : status?.state === "ok" ? (
                   <Badge variant="primary">{status.count} holdings</Badge>
+                ) : !status && server.state === "ready" ? (
+                  <Badge variant="primary">Ready for chat</Badge>
                 ) : status?.state === "error" || server.state === "failed" ? (
                   <Badge variant="destructive">Error</Badge>
                 ) : (

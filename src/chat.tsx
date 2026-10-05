@@ -16,8 +16,23 @@ const SUGGESTIONS = [
   "How is my portfolio doing?",
   "Which holding is my biggest risk?",
   "How much do I have in US stocks?",
+  "What's TCS trading at, and its P/E?",
   "Summarise today's analysis"
 ];
+
+const CONNECTOR_LABELS: Record<string, string> = {
+  kite: "Kite",
+  indmoney: "INDmoney",
+  tapetide: "Tapetide"
+};
+
+/** "tapetide_get_quote" → "Tapetide: get quote". */
+function toolLabel(name: string): string {
+  if (TOOL_LABELS[name]) return TOOL_LABELS[name];
+  const [prefix, ...rest] = name.split("_");
+  const source = CONNECTOR_LABELS[prefix];
+  return source ? `${source}: ${rest.join(" ")}` : name;
+}
 
 const TOOL_LABELS: Record<string, string> = {
   refreshPortfolio: "Fetching fresh holdings",
@@ -116,7 +131,7 @@ export function Chat({
                         size={12}
                         className={done ? "" : "animate-spin"}
                       />
-                      {TOOL_LABELS[name] ?? name}
+                      {toolLabel(name)}
                       {done
                         ? " ✓"
                         : part.state === "output-error"
